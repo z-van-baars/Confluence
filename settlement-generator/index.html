@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settlement Generator</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header class="sidebar-header">
+        <h1>Settlement Generator</h1>
+        <button id="btn-generate" class="btn-primary">Generate</button>
+      </header>
+      <div id="controls"></div>
+      <div id="layers-panel"></div>
+      <div id="export-panel">
+        <h3>Export</h3>
+        <div class="export-buttons">
+          <button id="btn-export-png" class="btn-small">PNG</button>
+          <button id="btn-export-svg" class="btn-small">SVG</button>
+          <button id="btn-export-geojson" class="btn-small">GeoJSON</button>
+          <button id="btn-export-tiles" class="btn-small">Tiles</button>
+        </div>
+      </div>
+    </aside>
+    <main id="canvas-container">
+      <canvas id="map-canvas"></canvas>
+    </main>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+All changes hot-reloaded. Refresh http://localhost:3001/ — here's what changed:
+
+  Roads: Removed the generateMainRoads function entirely — those radial highways that cut through everything are gone.
+  Only Voronoi-edge roads remain, which inherently follow the cell boundaries. Road render widths cut in half (highway
+  8→3, main 5→2.5, etc) so they fit within the cell gaps instead of overflowing into building blocks.
+
+  Walls: Buildings now check proximity to wall segments before placement. Any building with a vertex within
+  wall.thickness + 3 pixels of the wall path gets skipped. No more buildings overlapping walls.
+
+  Center density: Courtyard deletion rates reduced across the board (core: 3%→2%, mid: 7%→4%, near-wall: 14%→10%).
+  Removed the +12% market deletion bonus that was hollowing out the center. Castle/noble/temple parcel targets further
+  reduced so more buildings fit per cell.
+
+  Building gaps: Inset between adjacent buildings within a block dropped from 0.3-0.7px to 0.1-0.25px — they should now
+  nearly share walls, with the visible "streets" only appearing between cell blocks (where the 2-2.5px parcel inset
+  creates a consistent 4-5px gap).
+
+  Re the building colors: those come from the style system mapping building types to colors — castle_keep/tower are
+  darker, temples are lighter, taverns are warmer, hovels are grayer. It's the PARCHMENT_STYLE.building.special palette.
+   I can unify them to a single color if you want, or leave the subtle variation.
