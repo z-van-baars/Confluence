@@ -3,9 +3,9 @@ import type { RenderLayer } from '../core/types';
 export const DEFAULT_RENDER_LAYERS: RenderLayer[] = [
   { id: 'terrain', name: 'Terrain', visible: true, opacity: 1, order: 0 },
   { id: 'water', name: 'Water', visible: true, opacity: 1, order: 1 },
-  { id: 'districts', name: 'Districts', visible: true, opacity: 0.3, order: 2 },
+  { id: 'districts', name: 'Districts', visible: false, opacity: 0.3, order: 2 },
   { id: 'parcels', name: 'Parcels', visible: false, opacity: 0.7, order: 3 },
-  { id: 'roads', name: 'Roads', visible: true, opacity: 1, order: 4 },
+  { id: 'roads', name: 'Roads', visible: false, opacity: 1, order: 4 },
   { id: 'walls', name: 'Walls', visible: true, opacity: 1, order: 5 },
   { id: 'buildings', name: 'Buildings', visible: true, opacity: 1, order: 6 },
   { id: 'vegetation', name: 'Vegetation', visible: true, opacity: 1, order: 7 },

@@ -22,19 +22,19 @@ export function buildWalls(
     return { border, wall: null, gates: [] };
   }
 
-  // ── Smooth wall boundary ──
-  const factor = Math.min(1, 40 / innerPatches.length);
-  for (const v of border.shape) {
-    // smoothing happens below after gate placement
-    void v;
-  }
-
   // ── Gate placement ──
   const gates = placeGates(border.shape, innerPatches, rng);
   border.gates = gates;
 
-  // ── Smooth wall vertices (skip gate vertices) ──
-  smoothWallShape(border.shape, gates, factor);
+  // ── Smooth wall vertices (3 passes, skip gate vertices) ──
+  const factor = Math.min(1, 40 / innerPatches.length);
+  const gateSet = new Set(gates);
+  for (let pass = 0; pass < 3; pass++) {
+    smoothWallShape(border.shape, gateSet, factor);
+  }
+
+  // Additional smoothing pass on gate vertices only
+  smoothGateVertices(border.shape, gateSet, factor);
 
   // ── Towers: every non-gate vertex ──
   border.towers = border.shape.filter(v => !gates.includes(v));
@@ -181,21 +181,29 @@ function placeGates(shape: Point[], innerPatches: Patch[], rng: SeededRNG): Poin
 
 // ── Wall smoothing ─────────────────────────────────────────────────────────
 
-function smoothWallShape(shape: Point[], gates: Set<Point> | Point[], factor: number): void {
-  const gateSet = gates instanceof Set ? gates : new Set(gates);
+function smoothWallShape(shape: Point[], gateSet: Set<Point>, factor: number): void {
   const n = shape.length;
-  const ox = shape.map(p => p.x);
-  const oy = shape.map(p => p.y);
-
   for (let i = 0; i < n; i++) {
     if (gateSet.has(shape[i])) continue;
-    const prev = (i + n - 1) % n;
-    const next = (i + 1) % n;
-    // Watabou: v = lerp(v, midpoint(prev,next), factor)
-    const mx = (ox[prev] + ox[next]) / 2;
-    const my = (oy[prev] + oy[next]) / 2;
-    shape[i].x = shape[i].x + (mx - shape[i].x) * factor;
-    shape[i].y = shape[i].y + (my - shape[i].y) * factor;
+    const prev = shape[(i + n - 1) % n];
+    const next = shape[(i + 1) % n];
+    const mx = (prev.x + next.x) / 2;
+    const my = (prev.y + next.y) / 2;
+    shape[i].x += (mx - shape[i].x) * factor;
+    shape[i].y += (my - shape[i].y) * factor;
+  }
+}
+
+function smoothGateVertices(shape: Point[], gateSet: Set<Point>, factor: number): void {
+  const n = shape.length;
+  for (let i = 0; i < n; i++) {
+    if (!gateSet.has(shape[i])) continue;
+    const prev = shape[(i + n - 1) % n];
+    const next = shape[(i + 1) % n];
+    const mx = (prev.x + next.x) / 2;
+    const my = (prev.y + next.y) / 2;
+    shape[i].x += (mx - shape[i].x) * factor;
+    shape[i].y += (my - shape[i].y) * factor;
   }
 }
 
