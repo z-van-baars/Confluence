@@ -250,6 +250,11 @@ export class SettlementRenderer {
     const ctx = this.ctx;
 
     for (const district of s.districts) {
+      // Only fill countryside districts — city ward fills bleed through building
+      // gaps and create visible ward-boundary lines (Fix 2).
+      // Exception: market/plaza cells get a distinctly lighter cream so open space reads clearly.
+      const isOutside = district.type === 'farmland' || district.type === 'garden';
+      const isPlaza = district.type === 'market';
       const colors = this.style.district[district.type];
       if (!colors) continue;
 
@@ -257,7 +262,11 @@ export class SettlementRenderer {
         const cell = s.layout.cells.find(c => c.id === cellId);
         if (!cell || cell.isBoundary) continue;
 
-        ctx.fillStyle = colors.fill;
+        let districtFill: string;
+        if (isOutside) districtFill = colors.fill;
+        else if (isPlaza) districtFill = lightenHex(this.style.background, 22);
+        else districtFill = this.style.background;
+        ctx.fillStyle = districtFill;
         ctx.beginPath();
         const pts = cell.polygon.points;
         ctx.moveTo(pts[0].x, pts[0].y);
@@ -306,15 +315,34 @@ export class SettlementRenderer {
     const ctx = this.ctx;
 
     for (const wall of s.walls) {
-      ctx.strokeStyle = this.style.wall.stroke;
-      ctx.lineWidth = wall.thickness + 2;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      this.strokePath(wall.path);
+      // Build gate vertex set using reference equality (Points are shared objects).
+      const gatePoints = new Set(wall.gates.map(g => g.position));
 
-      ctx.strokeStyle = this.style.wall.fill;
-      ctx.lineWidth = wall.thickness;
-      this.strokePath(wall.path);
+      // Draw wall as polyline segments, breaking at gate vertices so gaps appear.
+      const strokeWallSegments = (lineWidth: number, strokeStyle: string) => {
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        let seg: Point[] = [];
+        const flush = () => {
+          if (seg.length >= 2) this.strokePath(seg);
+          seg = [];
+        };
+        for (const v of wall.path) {
+          if (gatePoints.has(v)) {
+            seg.push(v); // close incoming edge up to gate vertex
+            flush();     // outgoing edge from gate is suppressed
+          } else {
+            seg.push(v);
+          }
+        }
+        flush();
+      };
+
+      strokeWallSegments(wall.thickness + 2, this.style.wall.stroke);
+      strokeWallSegments(wall.thickness, this.style.wall.fill);
 
       for (const tower of wall.towers) {
         ctx.fillStyle = this.style.wall.tower;
@@ -343,11 +371,21 @@ export class SettlementRenderer {
       }
 
       for (const gate of wall.gates) {
-        ctx.fillStyle = this.style.wall.gate;
+        // Draw gate as a small opening indicator: two perpendicular stubs
+        const pos = gate.position;
+        ctx.strokeStyle = this.style.wall.gate;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
         ctx.save();
-        ctx.translate(gate.position.x, gate.position.y);
+        ctx.translate(pos.x, pos.y);
         ctx.rotate(gate.direction);
-        ctx.fillRect(-gate.width / 2, -3, gate.width, 6);
+        const stubLen = 8;
+        ctx.beginPath();
+        ctx.moveTo(-gate.width / 2 - stubLen, 0);
+        ctx.lineTo(-gate.width / 2, 0);
+        ctx.moveTo(gate.width / 2, 0);
+        ctx.lineTo(gate.width / 2 + stubLen, 0);
+        ctx.stroke();
         ctx.restore();
       }
     }
@@ -367,8 +405,15 @@ export class SettlementRenderer {
     if (pts.length < 3) return;
 
     const special = this.style.building.special[building.type];
-    const fill = special?.fill ?? this.style.building.fill;
+    let fill = special?.fill ?? this.style.building.fill;
     const stroke = special?.stroke ?? this.style.building.stroke;
+
+    // Per-building deterministic fill variation (Fix 10): lighter = courtyard or stone
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const hash = Math.abs(Math.sin(cx * 17.317 + cy * 41.739));
+    if (hash < 0.08) fill = lightenHex(fill, 28);
+    else if (hash < 0.20) fill = lightenHex(fill, 10);
 
     const center = polygonCentroid(building.footprint);
     ctx.save();
@@ -469,16 +514,8 @@ export class SettlementRenderer {
           break;
 
         case 'market_square':
-          ctx.beginPath();
-          ctx.rect(
-            landmark.position.x - landmark.radius,
-            landmark.position.y - landmark.radius,
-            landmark.radius * 2,
-            landmark.radius * 2,
-          );
-          ctx.fillStyle = this.style.road.highway.fill;
-          ctx.fill();
-          ctx.stroke();
+          // The plaza patch already renders as open space — no overlay rectangle.
+          // Only the text label below is shown.
           break;
 
         default:
@@ -676,4 +713,13 @@ export class SettlementRenderer {
       this.scheduleRender();
     }, { passive: false });
   }
+}
+
+// Lighten a #rrggbb hex color by `amount` per channel (clamped to 255).
+function lightenHex(hex: string, amount: number): string {
+  if (!hex.startsWith('#') || hex.length !== 7) return hex;
+  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + amount);
+  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + amount);
+  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + amount);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }

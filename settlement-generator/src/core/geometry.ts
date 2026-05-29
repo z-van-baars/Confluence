@@ -144,6 +144,235 @@ export function segmentIntersection(
   return { point: { x: a1.x + t * dx1, y: a1.y + t * dy1 }, t };
 }
 
+// ── Watabou geometry primitives ─────────────────────────────────────────────
+
+export function isConvex(pts: Point[]): boolean {
+  const n = pts.length;
+  if (n < 3) return false;
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const c = pts[(i + 2) % n];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cross) < 1e-10) continue;
+    const s = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
+}
+
+// In-place 3-point weighted smoothing. If closed=false (default), endpoints are fixed.
+export function smoothVertexEq(pts: Point[], factor: number, closed = false): void {
+  const n = pts.length;
+  if (n < 3) return;
+  const ox = pts.map(p => p.x);
+  const oy = pts.map(p => p.y);
+  const denom = factor + 2;
+  const start = closed ? 0 : 1;
+  const end = closed ? n : n - 1;
+  for (let i = start; i < end; i++) {
+    const prev = (i + n - 1) % n;
+    const next = (i + 1) % n;
+    pts[i].x = (ox[prev] + factor * ox[i] + ox[next]) / denom;
+    pts[i].y = (oy[prev] + factor * oy[i] + oy[next]) / denom;
+  }
+}
+
+// Bisect a polygon along an infinite line through p1→p2. Returns [left, right]
+// sub-polygons (left = positive side of p1→p2). If gap > 0, each half's cut
+// edge is shortened by gap/2 on each end, creating an alley gap between halves.
+export function polygonCut(
+  pts: Point[],
+  p1: Point,
+  p2: Point,
+  gap: number,
+): [Point[], Point[]] | null {
+  const n = pts.length;
+  if (n < 3) return null;
+
+  const cdx = p2.x - p1.x;
+  const cdy = p2.y - p1.y;
+  const sideOf = (p: Point) => cdx * (p.y - p1.y) - cdy * (p.x - p1.x);
+  const sides = pts.map(sideOf);
+
+  const left: Point[] = [];
+  const right: Point[] = [];
+  const cutInLeft: Point[] = [];
+  const cutInRight: Point[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const sa = sides[i];
+    const sb = sides[j];
+
+    if (sa >= 0) left.push({ x: pts[i].x, y: pts[i].y });
+    else right.push({ x: pts[i].x, y: pts[i].y });
+
+    const diff = sa - sb;
+    if (Math.abs(diff) > 1e-10 && ((sa < 0) !== (sb < 0))) {
+      const t = sa / diff;
+      const cx = pts[i].x + t * (pts[j].x - pts[i].x);
+      const cy = pts[i].y + t * (pts[j].y - pts[i].y);
+      const cutL: Point = { x: cx, y: cy };
+      const cutR: Point = { x: cx, y: cy };
+      left.push(cutL);
+      right.push(cutR);
+      cutInLeft.push(cutL);
+      cutInRight.push(cutR);
+    }
+  }
+
+  if (left.length < 3 || right.length < 3 || cutInLeft.length < 2) return null;
+
+  if (gap > 0) {
+    applyCutGap(left, cutInLeft, gap / 2);
+    applyCutGap(right, cutInRight, gap / 2);
+  }
+
+  return [left, right];
+}
+
+function applyCutGap(pts: Point[], cutPts: Point[], d: number): void {
+  for (const cp of cutPts) {
+    const idx = pts.indexOf(cp);
+    if (idx < 0) continue;
+    const n = pts.length;
+    const prev = pts[(idx + n - 1) % n];
+    const next = pts[(idx + 1) % n];
+    const prevIsCut = cutPts.includes(prev);
+    const neighbor = prevIsCut ? next : prev;
+    const dx = neighbor.x - cp.x;
+    const dy = neighbor.y - cp.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > d * 2) {
+      cp.x += (dx / len) * d;
+      cp.y += (dy / len) * d;
+    }
+  }
+}
+
+// Per-edge inset for convex polygons. depths[i] is the inset for the edge
+// from pts[i] to pts[(i+1)%n]. Returns null if degenerate.
+export function polygonShrink(pts: Point[], depths: number[]): Point[] | null {
+  const n = pts.length;
+  if (n < 3 || depths.length !== n) return null;
+
+  const cx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / n;
+
+  // Compute offset lines: each edge moved inward by depths[i]
+  const oe: { ax: number; ay: number; bx: number; by: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const dx = pts[j].x - pts[i].x;
+    const dy = pts[j].y - pts[i].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-10) return null;
+    let nx = dy / len;
+    let ny = -dx / len;
+    // Flip normal to point inward (toward centroid)
+    const mx = (pts[i].x + pts[j].x) / 2;
+    const my = (pts[i].y + pts[j].y) / 2;
+    if (nx * (cx - mx) + ny * (cy - my) < 0) { nx = -nx; ny = -ny; }
+    const d = depths[i];
+    oe.push({
+      ax: pts[i].x + nx * d, ay: pts[i].y + ny * d,
+      bx: pts[j].x + nx * d, by: pts[j].y + ny * d,
+    });
+  }
+
+  // New vertices = pairwise intersections of adjacent offset lines
+  const result: Point[] = [];
+  for (let k = 0; k < n; k++) {
+    const prev = (k + n - 1) % n;
+    const p = lineLineIntersect2(
+      oe[prev].ax, oe[prev].ay, oe[prev].bx, oe[prev].by,
+      oe[k].ax, oe[k].ay, oe[k].bx, oe[k].by,
+    );
+    if (!p) {
+      result.push({ x: (oe[prev].bx + oe[k].ax) / 2, y: (oe[prev].by + oe[k].ay) / 2 });
+    } else {
+      result.push(p);
+    }
+  }
+
+  return result.length >= 3 ? result : null;
+}
+
+// Per-edge inset for concave polygons. Same as shrink but resolves
+// self-intersections by clipping out "ear" regions.
+export function polygonBuffer(pts: Point[], depths: number[]): Point[] | null {
+  const shrunk = polygonShrink(pts, depths);
+  if (!shrunk) return null;
+  const cleaned = removeEars(shrunk);
+  return cleaned.length >= 3 ? cleaned : null;
+}
+
+function removeEars(pts: Point[]): Point[] {
+  let current = pts;
+  for (let iter = 0; iter < 8; iter++) {
+    const n = current.length;
+    if (n < 3) break;
+    let found = false;
+    for (let i = 0; i < n && !found; i++) {
+      const ni = (i + 1) % n;
+      for (let j = i + 2; j < n && !found; j++) {
+        const nj = (j + 1) % n;
+        if (j === n - 1 && i === 0) continue;
+        const hit = segmentIntersection(current[i], current[ni], current[j], current[nj]);
+        if (hit) {
+          const next: Point[] = [];
+          for (let k = 0; k <= i; k++) next.push(current[k]);
+          next.push(hit.point);
+          for (let k = nj; k < n; k++) next.push(current[k]);
+          if (next.length >= 3) { current = next; found = true; }
+        }
+      }
+    }
+    if (!found) break;
+  }
+  return current;
+}
+
+// Shorten the edge at edgeIdx by moving each endpoint d units toward
+// its outer neighbor. Returns a new Point[] (does not mutate).
+export function polygonPeel(pts: Point[], edgeIdx: number, d: number): Point[] {
+  const n = pts.length;
+  const result = pts.map(p => ({ x: p.x, y: p.y }));
+  const si = edgeIdx;
+  const ei = (edgeIdx + 1) % n;
+  const pi = (si + n - 1) % n;
+  const ni = (ei + 1) % n;
+
+  const moveBy = (target: Point, toward: Point, dist: number) => {
+    const dx = toward.x - target.x;
+    const dy = toward.y - target.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > dist * 2) {
+      target.x += (dx / len) * dist;
+      target.y += (dy / len) * dist;
+    }
+  };
+
+  moveBy(result[si], result[pi], d);
+  moveBy(result[ei], result[ni], d);
+  return result;
+}
+
+function lineLineIntersect2(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx: number, dy: number,
+): Point | null {
+  const d1x = bx - ax, d1y = by - ay;
+  const d2x = dx - cx, d2y = dy - cy;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-10) return null;
+  const t = ((cx - ax) * d2y - (cy - ay) * d2x) / denom;
+  return { x: ax + t * d1x, y: ay + t * d1y };
+}
+
 export function subdividePolygon(
   poly: Polygon,
   minArea: number,

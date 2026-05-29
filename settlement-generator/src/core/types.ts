@@ -264,6 +264,51 @@ export interface GenerationParameters {
   vegetationDensity: number;
 }
 
+// ── Watabou Model Types ──
+
+export type WardType =
+  | 'castle' | 'market' | 'merchant' | 'craftsmen' | 'slum'
+  | 'gate' | 'patriciate' | 'military' | 'park' | 'cathedral'
+  | 'administration' | 'farm' | 'generic';
+
+export interface Patch {
+  id: number;
+  shape: Point[];        // shared-ref vertices (mutable)
+  site: Point;
+  withinCity: boolean;
+  withinWalls: boolean;
+  wardType: WardType | null;
+  geometry: Point[][];   // building footprints from createAlleys
+}
+
+export interface Artery {
+  id: string;
+  path: Point[];
+  isStreet: boolean;     // true = inner gate→plaza, false = outer road
+}
+
+export interface CurtainWall {
+  shape: Point[];
+  gates: Point[];
+  towers: Point[];
+  isReal: boolean;
+}
+
+export interface TownModel {
+  patches: Patch[];
+  innerPatches: Patch[];
+  citadel: Patch | null;
+  plaza: Patch | null;
+  center: Point;
+  border: CurtainWall;
+  wall: CurtainWall | null;
+  gates: Point[];
+  arteries: Artery[];
+  streets: Artery[];
+  roads: Artery[];
+  scale: number;
+}
+
 // ── The Settlement ──
 
 export interface Settlement {
@@ -282,7 +327,6 @@ export interface Settlement {
   vegetation: VegetationCluster[];
   decorations: Decoration[];
   dataLayers: DataLayer[];
-  // Vertex density map: "Math.round(x),Math.round(y)" → avg density of neighboring cells.
-  // Useful for building depth, courtyard probability, future prosperity/health stats.
   vertexDensity: Record<string, number>;
+  model?: TownModel;
 }
