@@ -1,4 +1,4 @@
-import type { GenerationParameters, Patch, Artery, CurtainWall, Point } from '../../core/types';
+import type { GenerationParameters, Patch, Artery, CurtainWall, Point, DebugBlockData, DebugCutLine } from '../../core/types';
 import { SeededRNG } from '../../core/rng';
 import {
   polygonArea,
@@ -27,18 +27,28 @@ interface WardParams {
 }
 
 const WARD_PARAMS_BASE: Record<string, WardParams> = {
-  craftsmen:      { minSq: 50,  gridChaos: 0.6, sizeChaos: 0.6, emptyProb: 0.04 },
-  slum:           { minSq: 20,  gridChaos: 0.8, sizeChaos: 0.8, emptyProb: 0.03 },
-  merchant:       { minSq: 80,  gridChaos: 0.6, sizeChaos: 0.7, emptyProb: 0.15 },
-  patriciate:     { minSq: 80,  gridChaos: 0.5, sizeChaos: 0.7, emptyProb: 0.15 },
-  gate:           { minSq: 35,  gridChaos: 0.6, sizeChaos: 0.7, emptyProb: 0.04 },
-  administration: { minSq: 70,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.10 },
-  cathedral:      { minSq: 120, gridChaos: 0.3, sizeChaos: 0.4, emptyProb: 0.20 },
-  military:       { minSq: 70,  gridChaos: 0.3, sizeChaos: 0.4, emptyProb: 0.05 },
-  park:           { minSq: 35,  gridChaos: 0.5, sizeChaos: 0.5, emptyProb: 0.60 },
+  craftsmen:      { minSq: 25,  gridChaos: 0.6, sizeChaos: 0.6, emptyProb: 0.04 },
+  slum:           { minSq: 10,  gridChaos: 0.8, sizeChaos: 0.8, emptyProb: 0.03 },
+  merchant:       { minSq: 40,  gridChaos: 0.6, sizeChaos: 0.7, emptyProb: 0.15 },
+  patriciate:     { minSq: 40,  gridChaos: 0.5, sizeChaos: 0.7, emptyProb: 0.15 },
+  gate:           { minSq: 18,  gridChaos: 0.6, sizeChaos: 0.7, emptyProb: 0.04 },
+  administration: { minSq: 35,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.10 },
+  cathedral:      { minSq: 60,  gridChaos: 0.3, sizeChaos: 0.4, emptyProb: 0.20 },
+  military:       { minSq: 35,  gridChaos: 0.3, sizeChaos: 0.4, emptyProb: 0.05 },
+  park:           { minSq: 18,  gridChaos: 0.5, sizeChaos: 0.5, emptyProb: 0.60 },
   farm:           { minSq: 9999,gridChaos: 0.5, sizeChaos: 0.5, emptyProb: 0.00 },
-  generic:        { minSq: 40,  gridChaos: 0.7, sizeChaos: 0.6, emptyProb: 0.05 },
+  generic:        { minSq: 20,  gridChaos: 0.7, sizeChaos: 0.6, emptyProb: 0.05 },
 };
+
+// Debug target priority — prefer craftsmen within the wall with a non-degenerate shape.
+// Fallback order if none found: slum → merchant → patriciate → gate.
+const DEBUG_WARD_PRIORITY = ['craftsmen', 'slum', 'merchant', 'patriciate', 'gate'];
+
+function isGoodDebugCandidate(patch: Patch): boolean {
+  return patch.withinCity && patch.withinWalls === true
+    && patch.shape.length >= 5
+    && !hasAcuteAngle(patch.shape, 25);
+}
 
 export function buildGeometry(
   patches: Patch[],
@@ -48,41 +58,31 @@ export function buildGeometry(
   _params: GenerationParameters,
   rng: SeededRNG,
   scale: number,
-): void {
+): DebugBlockData | null {
   const S = scale;
   const S2 = S * S;
   const wallShapeSet = new Set<Point>(wall?.shape ?? []);
   const arteryEdges = buildArteryEdgeSet(arteries);
   const plazaEdges = buildPlazaEdgeSet(plaza);
 
-  // Task 3 diagnostic: log patches that end up with no geometry inside the city
-  const _logEmptyPatches = () => {
-    for (const patch of patches) {
-      if (patch.withinCity && patch.wardType && patch.wardType !== 'market' && patch.wardType !== 'park' && patch.geometry.length === 0) {
-        const patchArea = polygonArea({ points: patch.shape });
-        const cityBlock = getCityBlock(patch, arteryEdges, wallShapeSet, plazaEdges, S);
-        const cityBlockArea = cityBlock ? polygonArea({ points: cityBlock }) : null;
-        console.log('[Confluence] Empty inner patch:', {
-          wardType: patch.wardType,
-          patchArea: Math.round(patchArea),
-          cityBlockArea: cityBlockArea !== null ? Math.round(cityBlockArea) : 'null',
-          withinWalls: patch.withinWalls,
-        });
-      }
-    }
-  };
+  let debugData: DebugBlockData | null = null;
+
+  // Pre-select the best debug candidate by ward priority
+  let debugTargetId: number | null = null;
+  for (const wardType of DEBUG_WARD_PRIORITY) {
+    const candidate = patches.find(p => p.wardType === wardType && isGoodDebugCandidate(p));
+    if (candidate) { debugTargetId = candidate.id; break; }
+  }
 
   for (const patch of patches) {
     if (!patch.withinCity && patch.wardType !== 'gate') continue;
     if (patch.shape.length < 3) continue;
 
-    // Farm: one footprint per patch (the whole shape)
     if (patch.wardType === 'farm') {
       patch.geometry = [patch.shape.map(p => ({ x: p.x, y: p.y }))];
       continue;
     }
 
-    // Market (plaza): open space with a small fountain/statue at center
     if (patch.wardType === 'market') {
       const patchArea = polygonArea({ points: patch.shape });
       const plazaRadius = Math.sqrt(patchArea / Math.PI);
@@ -91,11 +91,9 @@ export function buildGeometry(
       continue;
     }
 
-    // Compute the city block (inset polygon)
     const cityBlock = getCityBlock(patch, arteryEdges, wallShapeSet, plazaEdges, S);
     if (!cityBlock || polygonArea({ points: cityBlock }) < S2 * 2) continue;
 
-    // Castle: orthogonal building layout
     if (patch.wardType === 'castle') {
       patch.geometry = createOrthoBuilding(cityBlock, S2 * 60, 0.8, rng);
       continue;
@@ -104,13 +102,52 @@ export function buildGeometry(
     const base = WARD_PARAMS_BASE[patch.wardType ?? 'generic'] ?? WARD_PARAMS_BASE.generic;
     const wp: WardParams = { ...base, minSq: base.minSq * S2 };
 
-    // Fix 4C: clamp effectiveMinSq so no single block fills the whole city block
     const blockArea = polygonArea({ points: cityBlock });
     const effectiveWp: WardParams = { ...wp, minSq: Math.min(wp.minSq, blockArea * 0.5) };
 
-    const buildings = createAlleys(cityBlock, effectiveWp, rng, S, true, 0);
+    const cutCollector: DebugCutLine[] | undefined =
+      patch.id === debugTargetId ? [] : undefined;
 
-    // Outside the wall: cull buildings far from roads so they cling organically to streets
+    const buildings = createAlleys(cityBlock, effectiveWp, rng, S, true, 0, cutCollector);
+
+    if (cutCollector) {
+      const rawArea = polygonArea({ points: patch.shape });
+      const bArea = polygonArea({ points: cityBlock });
+      const areas = buildings.map(b => polygonArea({ points: b }));
+      const minA = areas.length ? Math.min(...areas) : 0;
+      const maxA = areas.length ? Math.max(...areas) : 0;
+      const meanA = areas.length ? areas.reduce((s, a) => s + a, 0) / areas.length : 0;
+
+      debugData = {
+        rawShape: patch.shape,
+        cityBlock,
+        cutLines: cutCollector,
+        buildings,
+        rawArea,
+        blockArea: bArea,
+        blockVertexCount: cityBlock.length,
+        blockIsConvex: isConvex(cityBlock),
+        buildingCount: buildings.length,
+        buildingAreaMin: minA,
+        buildingAreaMax: maxA,
+        buildingAreaMean: meanA,
+      };
+
+      console.group('[Confluence] Debug block — ' + (patch.wardType ?? 'unknown'));
+      console.log('  raw cell area:      ', Math.round(rawArea));
+      console.log('  inset block area:   ', Math.round(bArea));
+      console.log('  block vertex count: ', cityBlock.length);
+      console.log('  block is convex:    ', isConvex(cityBlock));
+      console.log('  cut lines:          ', cutCollector.length);
+      console.log('  buildings produced: ', buildings.length);
+      if (areas.length) {
+        console.log('  building area min:  ', Math.round(minA));
+        console.log('  building area max:  ', Math.round(maxA));
+        console.log('  building area mean: ', Math.round(meanA));
+      }
+      console.groupEnd();
+    }
+
     if (!patch.withinWalls) {
       const patchArea = polygonArea({ points: patch.shape });
       const patchRadius = Math.sqrt(patchArea / Math.PI);
@@ -120,7 +157,7 @@ export function buildGeometry(
     }
   }
 
-  _logEmptyPatches();
+  return debugData;
 }
 
 // ── getCityBlock ────────────────────────────────────────────────────────────
@@ -193,17 +230,16 @@ function createAlleys(
   S: number,
   doSplit: boolean,
   depth: number,
+  cutCollector?: DebugCutLine[],
 ): Point[][] {
   const area = polygonArea({ points: pts });
   if (depth > 20) return area > wp.minSq * 0.5 ? [pts] : [];
 
-  // Sub-fix C: acute or degenerate polygons produce only slivers — treat as single building
   if (pts.length < 4 || hasAcuteAngle(pts, 15)) {
     if (area >= wp.minSq * 0.5 && buildingCompactness(pts) >= MIN_BUILDING_COMPACTNESS) return [pts];
     return [];
   }
 
-  // Threshold with size chaos
   const threshold = wp.minSq * Math.pow(2, 4 * wp.sizeChaos * (rng.next() - 0.5));
 
   if (area < threshold) {
@@ -212,7 +248,6 @@ function createAlleys(
     return [pts];
   }
 
-  // Find longest edge
   let longestLen = 0;
   let longestIdx = 0;
   for (let i = 0; i < pts.length; i++) {
@@ -226,7 +261,6 @@ function createAlleys(
   const v = pts[longestIdx];
   const nxt = pts[(longestIdx + 1) % pts.length];
 
-  // Cut position along longest edge — clamped to middle 60% to prevent degenerate triangles
   const spread = 0.8 * wp.gridChaos;
   const ratio = Math.max(0.2, Math.min(0.8, (1 - spread) / 2 + rng.next() * spread));
   const p1: Point = {
@@ -234,18 +268,17 @@ function createAlleys(
     y: v.y + (nxt.y - v.y) * ratio,
   };
 
-  // Cut direction: perpendicular to edge, with angle jitter
   const edgeDx = nxt.x - v.x;
   const edgeDy = nxt.y - v.y;
   const angleSpread = (Math.PI / 6) * wp.gridChaos * (area > wp.minSq * 4 ? 1 : 0);
   const ang = (rng.next() - 0.5) * angleSpread;
   const cosA = Math.cos(ang), sinA = Math.sin(ang);
-  // Perpendicular to (edgeDx,edgeDy) is (-edgeDy,edgeDx); rotate by ang
   const perpX = -edgeDy * cosA - edgeDx * sinA;
   const perpY = -edgeDy * sinA + edgeDx * cosA;
   const p2: Point = { x: p1.x + perpX, y: p1.y + perpY };
 
-  // Alley gap between sub-blocks (scaled by S)
+  cutCollector?.push({ p1: { ...p1 }, p2: { ...p2 } });
+
   const alleyGap = doSplit ? ALLEY_HALF * 2 * S : 0;
 
   const halves = polygonCut(pts, p1, p2, alleyGap);
@@ -262,7 +295,7 @@ function createAlleys(
       }
     } else {
       const nextSplit = halfArea > wp.minSq / (rng.next() * rng.next() + 0.01);
-      results.push(...createAlleys(half, wp, rng, S, nextSplit, depth + 1));
+      results.push(...createAlleys(half, wp, rng, S, nextSplit, depth + 1, cutCollector));
     }
   }
 

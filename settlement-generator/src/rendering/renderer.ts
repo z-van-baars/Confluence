@@ -14,6 +14,7 @@ export class SettlementRenderer {
   private style: MapStyle = PARCHMENT_STYLE;
   private layers: RenderLayer[] = [...DEFAULT_RENDER_LAYERS];
   private settlement: Settlement | null = null;
+  private diagnosticMode: 'none' | 'street-network' = 'none';
 
   private panX = 0;
   private panY = 0;
@@ -33,6 +34,12 @@ export class SettlementRenderer {
     this.bufferCtx = bctx;
 
     this.setupInteraction();
+  }
+
+  toggleStreetNetwork(): void {
+    this.diagnosticMode = this.diagnosticMode === 'street-network' ? 'none' : 'street-network';
+    this.bufferDirty = true;
+    this.scheduleRender();
   }
 
   setStyle(style: MapStyle): void {
@@ -131,18 +138,79 @@ export class SettlementRenderer {
     this.ctx.save();
     this.ctx.scale(scale, scale);
 
-    this.ctx.fillStyle = this.style.background;
-    this.ctx.fillRect(0, 0, width, height);
+    if (this.diagnosticMode === 'street-network') {
+      this.renderStreetNetworkDiag();
+    } else {
+      this.ctx.fillStyle = this.style.background;
+      this.ctx.fillRect(0, 0, width, height);
 
-    const visible = getVisibleLayers(this.layers);
-    for (const layer of visible) {
-      this.ctx.globalAlpha = layer.opacity;
-      this.renderLayer(layer.id);
+      const visible = getVisibleLayers(this.layers);
+      for (const layer of visible) {
+        this.ctx.globalAlpha = layer.opacity;
+        this.renderLayer(layer.id);
+      }
+      this.ctx.globalAlpha = 1;
     }
-    this.ctx.globalAlpha = 1;
 
     this.ctx.restore();
     this.ctx = savedCtx;
+  }
+
+  private renderStreetNetworkDiag(): void {
+    const s = this.settlement!;
+    const model = s.model;
+    if (!model) return;
+
+    const ctx = this.ctx;
+    const { width, height } = s.bounds;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // Inner patch boundaries (thin gray)
+    ctx.strokeStyle = '#cccccc';
+    ctx.lineWidth = 0.8;
+    ctx.lineJoin = 'round';
+    for (const patch of model.innerPatches) {
+      const pts = patch.shape;
+      if (pts.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Outer wall (thick black)
+    if (model.border.isReal && model.border.shape.length >= 3) {
+      const shape = model.border.shape;
+      ctx.strokeStyle = '#111111';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(shape[0].x, shape[0].y);
+      for (let i = 1; i < shape.length; i++) ctx.lineTo(shape[i].x, shape[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Arteries (thick red)
+    ctx.strokeStyle = '#dd2222';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const artery of model.arteries) {
+      this.strokePath(artery.path);
+    }
+
+    // Gates (red dots)
+    ctx.fillStyle = '#dd2222';
+    for (const gate of model.gates) {
+      ctx.beginPath();
+      ctx.arc(gate.x, gate.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   private renderLayer(layerId: string): void {
@@ -514,8 +582,9 @@ export class SettlementRenderer {
           break;
 
         case 'market_square':
-          // The plaza patch already renders as open space — no overlay rectangle.
-          // Only the text label below is shown.
+        case 'castle':
+        case 'cathedral':
+          // Ward buildings already render; only the text label below is shown.
           break;
 
         default:

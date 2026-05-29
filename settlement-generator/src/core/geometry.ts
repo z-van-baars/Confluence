@@ -373,7 +373,82 @@ function lineLineIntersect2(
   return { x: ax + t * d1x, y: ay + t * d1y };
 }
 
+const ALLEY_WIDTH = 2.5;
+
+// Watabou-style subdivision: cuts from a point ON the longest edge (not centroid),
+// with randomized cut position, angular deviation for large polygons, and optional
+// alley gap between sub-blocks. rand must be a seeded function for reproducibility.
 export function subdividePolygon(
+  poly: Polygon,
+  minArea: number,
+  rand: () => number,
+  gridChaos = 0.5,
+  sizeChaos = 0.6,
+  emptyProb = 0.04,
+  split = true,
+): Polygon[] {
+  const area = polygonArea(poly);
+  const pts = poly.points;
+
+  if (area < minArea * 0.2 || pts.length < 3) {
+    return rand() > emptyProb ? [poly] : [];
+  }
+
+  // Find longest edge
+  let longestLen = 0;
+  let longestIdx = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    const dx = pts[j].x - pts[i].x;
+    const dy = pts[j].y - pts[i].y;
+    const len = dx * dx + dy * dy;
+    if (len > longestLen) { longestLen = len; longestIdx = i; }
+  }
+
+  const v = pts[longestIdx];
+  const next = pts[(longestIdx + 1) % pts.length];
+
+  // Cut point on the longest edge — randomized around the midpoint
+  const spread = 0.8 * gridChaos;
+  const ratio = (1 - spread) / 2 + rand() * spread;
+  const cutPoint = lerp(v, next, ratio);
+
+  // Angular deviation — suppressed near minimum size so final buildings are rectangular
+  const angleSpread = area > minArea * 4 ? (Math.PI / 6) * gridChaos : 0;
+  const angleRad = (rand() - 0.5) * angleSpread;
+
+  // Perpendicular to edge with optional rotation
+  const edgeDx = next.x - v.x;
+  const edgeDy = next.y - v.y;
+  const cosA = Math.cos(angleRad);
+  const sinA = Math.sin(angleRad);
+  const rx = edgeDx * cosA - edgeDy * sinA;
+  const ry = edgeDy * cosA + edgeDx * sinA;
+  const p2: Point = { x: cutPoint.x - ry, y: cutPoint.y + rx };
+
+  const halves = polygonCut(pts, cutPoint, p2, split ? ALLEY_WIDTH : 0);
+  if (!halves) return rand() > emptyProb ? [poly] : [];
+
+  const results: Polygon[] = [];
+  for (const half of halves) {
+    if (half.length < 3) continue;
+    const halfPoly: Polygon = { points: half };
+    const halfArea = polygonArea(halfPoly);
+    const threshold = minArea * Math.pow(2, 4 * sizeChaos * (rand() - 0.5));
+
+    if (halfArea < threshold) {
+      if (rand() > emptyProb) results.push(halfPoly);
+    } else {
+      const doSplit = halfArea > minArea / (rand() * rand() + 0.001);
+      results.push(...subdividePolygon(halfPoly, minArea, rand, gridChaos, sizeChaos, emptyProb, doSplit));
+    }
+  }
+
+  return results;
+}
+
+// Legacy centroid-based bisection kept for comparison.
+export function subdividePolygonLegacy(
   poly: Polygon,
   minArea: number,
 ): Polygon[] {
@@ -422,7 +497,7 @@ export function subdividePolygon(
   }
 
   const results: Polygon[] = [];
-  if (left.length >= 3) results.push(...subdividePolygon({ points: left }, minArea));
-  if (right.length >= 3) results.push(...subdividePolygon({ points: right }, minArea));
+  if (left.length >= 3) results.push(...subdividePolygonLegacy({ points: left }, minArea));
+  if (right.length >= 3) results.push(...subdividePolygonLegacy({ points: right }, minArea));
   return results.length > 0 ? results : [poly];
 }

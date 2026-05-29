@@ -160,7 +160,7 @@ export interface WallTower {
 export type LandmarkType =
   | 'fountain' | 'well' | 'market_square' | 'statue' | 'monument'
   | 'gallows' | 'stocks' | 'cross' | 'obelisk' | 'clock_tower'
-  | 'bridge';
+  | 'bridge' | 'castle' | 'cathedral';
 
 export interface Landmark {
   id: string;
@@ -294,6 +294,26 @@ export interface CurtainWall {
   isReal: boolean;
 }
 
+export interface DebugCutLine {
+  p1: Point;
+  p2: Point;
+}
+
+export interface DebugBlockData {
+  rawShape: Point[];
+  cityBlock: Point[] | null;
+  cutLines: DebugCutLine[];
+  buildings: Point[][];
+  rawArea: number;
+  blockArea: number | null;
+  blockVertexCount: number | null;
+  blockIsConvex: boolean | null;
+  buildingCount: number;
+  buildingAreaMin: number;
+  buildingAreaMax: number;
+  buildingAreaMean: number;
+}
+
 export interface TownModel {
   patches: Patch[];
   innerPatches: Patch[];
@@ -307,6 +327,7 @@ export interface TownModel {
   streets: Artery[];
   roads: Artery[];
   scale: number;
+  debugBlock?: DebugBlockData;
 }
 
 // ── The Settlement ──

@@ -22,7 +22,7 @@ export function buildTownModel(params: GenerationParameters, rng: SeededRNG): To
 
   createWards(patches, innerPatches, citadel, plaza, gates, params, rng.fork());
 
-  buildGeometry(patches, arteries, border.isReal ? border : null, plaza ?? null, params, rng.fork(), scale);
+  const debugBlock = buildGeometry(patches, arteries, border.isReal ? border : null, plaza ?? null, params, rng.fork(), scale) ?? undefined;
 
   return {
     patches,
@@ -37,5 +37,6 @@ export function buildTownModel(params: GenerationParameters, rng: SeededRNG): To
     streets,
     roads,
     scale,
+    debugBlock,
   };
 }

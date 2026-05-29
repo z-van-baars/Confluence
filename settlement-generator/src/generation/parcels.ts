@@ -2,27 +2,25 @@ import type { GenerationParameters, LayoutData, District, Parcel, Polygon, Point
 import { SeededRNG } from '../core/rng';
 import { polygonArea, polygonCentroid, subdividePolygon } from '../core/geometry';
 
-// TODO: Differentiate min areas per district type once basic residential fill
-// is dialed in. For now, all non-farmland districts use the same threshold to
-// get maximum uniform density for baseline evaluation.
-// Reference thresholds when revisiting:
-//   castle/warehouse: ~800-900  (large footprints)
-//   noble/temple:     ~600-700  (medium-large)
-//   craftsmen/military: ~300-500
-//   market/residential/garden: ~200-350
-//   poor:             ~150-200  (small hovels, max density)
-const DISTRICT_MIN_AREA: Record<string, number> = {
-  castle:      150,
-  noble:       150,
-  temple:      150,
-  market:      150,
-  residential: 150,
-  poor:        150,
-  craftsmen:   150,
-  warehouse:   150,
-  military:    150,
-  garden:      150,
-  farmland:    1200,
+interface DistrictSubdivideParams {
+  minAreaBase: number;
+  gridChaos: number;
+  sizeChaos: number;
+  emptyProb: number;
+}
+
+const DISTRICT_PARAMS: Record<string, DistrictSubdivideParams> = {
+  castle:      { minAreaBase: 600,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.10 },
+  noble:       { minAreaBase: 500,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.10 },
+  temple:      { minAreaBase: 500,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.08 },
+  market:      { minAreaBase: 200,  gridChaos: 0.6, sizeChaos: 0.7, emptyProb: 0.15 },
+  residential: { minAreaBase: 150,  gridChaos: 0.6, sizeChaos: 0.6, emptyProb: 0.04 },
+  poor:        { minAreaBase: 80,   gridChaos: 0.8, sizeChaos: 0.8, emptyProb: 0.03 },
+  craftsmen:   { minAreaBase: 150,  gridChaos: 0.6, sizeChaos: 0.6, emptyProb: 0.04 },
+  warehouse:   { minAreaBase: 350,  gridChaos: 0.5, sizeChaos: 0.6, emptyProb: 0.04 },
+  military:    { minAreaBase: 400,  gridChaos: 0.4, sizeChaos: 0.5, emptyProb: 0.05 },
+  garden:      { minAreaBase: 300,  gridChaos: 0.4, sizeChaos: 0.4, emptyProb: 0.20 },
+  farmland:    { minAreaBase: 1200, gridChaos: 0.3, sizeChaos: 0.3, emptyProb: 0.00 },
 };
 
 export function generateParcels(
@@ -60,10 +58,13 @@ export function generateParcels(
 
     const cellPoly = shrinkCellFromRoads(cell.polygon, edgeSetbackMap);
 
-    const baseMinArea = DISTRICT_MIN_AREA[district.type] ?? 150;
-    const minArea = baseMinArea * (1.4 - params.density * 0.8);
+    const dp = DISTRICT_PARAMS[district.type] ?? DISTRICT_PARAMS['craftsmen'];
+    const minArea = dp.minAreaBase * (1.4 - params.density * 0.8);
 
-    const subPolygons = subdividePolygon(cellPoly, minArea);
+    const subPolygons = subdividePolygon(
+      cellPoly, minArea, rng.next.bind(rng),
+      dp.gridChaos, dp.sizeChaos, dp.emptyProb,
+    );
 
     for (const poly of subPolygons) {
       const area = polygonArea(poly);

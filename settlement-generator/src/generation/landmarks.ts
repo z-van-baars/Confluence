@@ -28,6 +28,38 @@ export function placeLandmarks(
     }
   }
 
+  if (params.hasCastle) {
+    const castleDistrict = districts.find(d => d.type === 'castle');
+    if (castleDistrict) {
+      const cell = layout.cells.find(c => castleDistrict.cellIds.includes(c.id));
+      if (cell) {
+        landmarks.push({
+          id: `landmark-${id++}`,
+          position: polygonCentroid(cell.polygon),
+          type: 'castle',
+          radius: 20,
+          name: 'Castle',
+        });
+      }
+    }
+  }
+
+  if (params.hasTemple) {
+    const templeDistrict = districts.find(d => d.type === 'temple');
+    if (templeDistrict) {
+      const cell = layout.cells.find(c => templeDistrict.cellIds.includes(c.id));
+      if (cell) {
+        landmarks.push({
+          id: `landmark-${id++}`,
+          position: polygonCentroid(cell.polygon),
+          type: 'cathedral',
+          radius: 20,
+          name: 'Cathedral',
+        });
+      }
+    }
+  }
+
   const intersections = findRoadIntersections(roads);
   for (const intersection of intersections) {
     if (distance(intersection, layout.center) > layout.radius * 0.5) continue;
